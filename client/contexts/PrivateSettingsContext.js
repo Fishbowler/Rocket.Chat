@@ -1,6 +1,6 @@
 import { useDebouncedCallback, useMutableCallback } from '@rocket.chat/fuselage-hooks';
 import { Tracker } from 'meteor/tracker';
-import { createContext, useContext, RefObject, useState, useEffect, useLayoutEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useLayoutEffect } from 'react';
 
 import { useReactiveValue } from '../hooks/useReactiveValue';
 import { useBatchSettingsDispatch } from './SettingsContext';
@@ -8,39 +8,8 @@ import { useToastMessageDispatch } from './ToastMessagesContext';
 import { useTranslation, useLoadLanguage } from './TranslationContext';
 import { useUser } from './UserContext';
 
-type Setting = object & {
-	_id: unknown;
-	type: string;
-	blocked: boolean;
-	enableQuery: unknown;
-	group: string;
-	section: string;
-	changed: boolean;
-	value: unknown;
-	packageValue: unknown;
-	packageEditor: unknown;
-	editor: unknown;
-	disabled?: boolean;
-	update?: () => void;
-	reset?: () => void;
-};
-
-type PrivateSettingsState = {
-	settings: Setting[];
-	persistedSettings: Setting[];
-};
-
-type EqualityFunction<T> = (a: T, b: T) => boolean;
-
-type PrivateSettingsContextValue = {
-	subscribers: Set<(state: PrivateSettingsState) => void>;
-	stateRef: RefObject<PrivateSettingsState>;
-	hydrate: (changes: any[]) => void;
-	isDisabled: (setting: Setting) => boolean;
-};
-
-export const PrivateSettingsContext = createContext<PrivateSettingsContextValue>({
-	subscribers: new Set<(state: PrivateSettingsState) => void>(),
+export const PrivateSettingsContext = createContext({
+	subscribers: new Set(),
 	stateRef: {
 		current: {
 			settings: [],
@@ -51,14 +20,11 @@ export const PrivateSettingsContext = createContext<PrivateSettingsContextValue>
 	isDisabled: () => false,
 });
 
-const useSelector = <T>(
-	selector: (state: PrivateSettingsState) => T,
-	equalityFunction: EqualityFunction<T> = Object.is,
-): T | null => {
+const useSelector = (selector, equalityFunction = Object.is) => {
 	const { subscribers, stateRef } = useContext(PrivateSettingsContext);
-	const [value, setValue] = useState<T | null>(() => (stateRef.current ? selector(stateRef.current) : null));
+	const [value, setValue] = useState(() => (stateRef.current ? selector(stateRef.current) : null));
 
-	const handleUpdate = useMutableCallback((state: PrivateSettingsState) => {
+	const handleUpdate = useMutableCallback((state) => {
 		const newValue = selector(state);
 
 		if (!value || !equalityFunction(newValue, value)) {
@@ -69,7 +35,7 @@ const useSelector = <T>(
 	useEffect(() => {
 		subscribers.add(handleUpdate);
 
-		return (): void => {
+		return () => {
 			subscribers.delete(handleUpdate);
 		};
 	}, [handleUpdate]);
@@ -81,10 +47,10 @@ const useSelector = <T>(
 	return value;
 };
 
-export const usePrivateSettingsGroup = (groupId: string): any => {
+export const usePrivateSettingsGroup = (groupId) => {
 	const group = useSelector((state) => state.settings.find(({ _id, type }) => _id === groupId && type === 'group'));
 
-	const filterSettings = (settings: any[]): any[] => settings.filter(({ group }) => group === groupId);
+	const filterSettings = (settings) => settings.filter(({ group }) => group === groupId);
 
 	const changed = useSelector((state) => filterSettings(state.settings).some(({ changed }) => changed));
 	const sections = useSelector((state) => Array.from(new Set(filterSettings(state.settings).map(({ section }) => section || ''))), (a, b) => a.length === b.length && a.join() === b.join());
@@ -92,10 +58,10 @@ export const usePrivateSettingsGroup = (groupId: string): any => {
 	const batchSetSettings = useBatchSettingsDispatch();
 	const { stateRef, hydrate } = useContext(PrivateSettingsContext);
 
-	const dispatchToastMessage = useToastMessageDispatch() as any;
-	const t = useTranslation() as (key: string, ...args: any[]) => string;
-	const loadLanguage = useLoadLanguage() as any;
-	const user = useUser() as any;
+	const dispatchToastMessage = useToastMessageDispatch();
+	const t = useTranslation();
+	const loadLanguage = useLoadLanguage();
+	const user = useUser();
 
 	const save = useMutableCallback(async () => {
 		const state = stateRef.current;
@@ -148,10 +114,10 @@ export const usePrivateSettingsGroup = (groupId: string): any => {
 	return group && { ...group, sections, changed, save, cancel };
 };
 
-export const usePrivateSettingsSection = (groupId: string, sectionName?: string): any => {
+export const usePrivateSettingsSection = (groupId, sectionName) => {
 	sectionName = sectionName || '';
 
-	const filterSettings = (settings: any[]): any[] =>
+	const filterSettings = (settings) =>
 		settings.filter(({ group, section }) => group === groupId && ((!sectionName && !section) || (sectionName === section)));
 
 	const canReset = useSelector((state) => filterSettings(state.settings).some(({ value, packageValue }) => JSON.stringify(value) !== JSON.stringify(packageValue)));
@@ -186,10 +152,7 @@ export const usePrivateSettingsSection = (groupId: string, sectionName?: string)
 	};
 };
 
-export const usePrivateSettingActions = (persistedSetting: Setting | null | undefined): {
-	update: () => void;
-	reset: () => void;
-} => {
+export const usePrivateSettingActions = (persistedSetting) => {
 	const { hydrate } = useContext(PrivateSettingsContext);
 
 	const update = useDebouncedCallback(({ value, editor }) => {
@@ -201,7 +164,7 @@ export const usePrivateSettingActions = (persistedSetting: Setting | null | unde
 		}];
 
 		hydrate(changes);
-	}, 100, [hydrate, persistedSetting]) as () => void;
+	}, 100, [hydrate, persistedSetting]);
 
 	const reset = useDebouncedCallback(() => {
 		const changes = [{
@@ -212,23 +175,23 @@ export const usePrivateSettingActions = (persistedSetting: Setting | null | unde
 		}];
 
 		hydrate(changes);
-	}, 100, [hydrate, persistedSetting]) as () => void;
+	}, 100, [hydrate, persistedSetting]);
 
 	return { update, reset };
 };
 
-export const usePrivateSettingDisabledState = (setting: Setting | null | undefined): boolean => {
+export const usePrivateSettingDisabledState = (setting) => {
 	const { isDisabled } = useContext(PrivateSettingsContext);
-	return useReactiveValue(() => (setting ? isDisabled(setting) : false), [setting?.blocked, setting?.enableQuery]) as unknown as boolean;
+	return useReactiveValue(() => (setting ? isDisabled(setting) : false), [setting?.blocked, setting?.enableQuery]);
 };
 
-export const usePrivateSettingsSectionChangedState = (groupId: string, sectionName: string): boolean =>
+export const usePrivateSettingsSectionChangedState = (groupId, sectionName): boolean =>
 	!!useSelector((state) =>
 		state.settings.some(({ group, section, changed }) =>
 			group === groupId && ((!sectionName && !section) || (sectionName === section)) && changed));
 
-export const usePrivateSetting = (_id: string): Setting | null | undefined => {
-	const selectSetting = (settings: Setting[]): Setting | undefined => settings.find((setting) => setting._id === _id);
+export const usePrivateSetting = (_id) => {
+	const selectSetting = (settings) => settings.find((setting) => setting._id === _id);
 
 	const setting = useSelector((state) => selectSetting(state.settings));
 	const persistedSetting = useSelector((state) => selectSetting(state.persistedSettings));
